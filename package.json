@@ -1,0 +1,10 @@
+{
+  "name": "hill-campus-events",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check dist/app.js && node --check dist/aws-api.js && node --check infra/functions/api/index.mjs && node --check infra/functions/flyer/index.mjs",
+    "configure:frontend": "node scripts/configure-frontend.mjs"
+  }
+}

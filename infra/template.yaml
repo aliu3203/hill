@@ -1,0 +1,417 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  Hill campus events backend - uses AppSync and event-driven Lambda functions for a low-operations real-time MVP.
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+  com.aws.cloudformation.Context:
+    arch: Browser -> AppSync -> Lambda -> DynamoDB; S3 upload -> Lambda -> Bedrock -> DynamoDB + SNS
+    must:
+      - Keep all persistent stores private and encrypted
+      - Keep Bedrock model configurable by parameter
+    ref:
+      - at: ../README.md
+        has: app purpose + local and deployment workflow
+        scope: repo
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  BedrockModelId:
+    Type: String
+    Default: amazon.nova-lite-v1:0
+    Description: Bedrock model or inference-profile ID that accepts text and image input.
+    AllowedPattern: '^[A-Za-z0-9._:/-]+$'
+  AppOrigin:
+    Type: String
+    Default: https://hill-ucla-campus-events.kenz-mogannam.chatgpt.site
+    Description: Allowed browser origin for direct flyer uploads.
+    AllowedPattern: '^https://[^/]+$'
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 512
+    Timeout: 30
+    Tracing: Active
+    Environment:
+      Variables:
+        EVENTS_TABLE: !Ref EventsTable
+        ALERTS_TOPIC_ARN: !Ref AlertsTopic
+        FLYERS_BUCKET: !Ref FlyersBucket
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+
+Resources:
+  EventsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Single-table store for events and user preferences; on-demand capacity fits an early-stage bursty campus app.
+        must:
+          - Preserve PK and SK names; resolver code depends on them
+          - Retain data on stack deletion or replacement
+        mutable: change-with-constraints
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  FlyersBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Private landing zone for user flyer images; S3 events invoke extraction asynchronously.
+        must:
+          - Never permit public access
+          - Keep versioning and encryption enabled
+        mutable: change-with-constraints
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['content-type']
+            AllowedMethods: [PUT]
+            AllowedOrigins:
+              - !Ref AppOrigin
+            MaxAge: 300
+
+  FlyersBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FlyersBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt FlyersBucket.Arn
+              - !Sub '${FlyersBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  AlertsKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Encrypts alert messages at rest because SNS is not encrypted by default.
+        must:
+          - Permit SNS service use through the topic policy path
+        mutable: review-required
+    Properties:
+      Description: !Sub '${AWS::StackName} SNS encryption key'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+          - Sid: AllowSNSUse
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: '*'
+
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Fan-out channel for interest-match alerts; subscriptions are intentionally managed outside this stack.
+        must:
+          - Keep KMS encryption enabled
+        mutable: free-to-tune
+    Properties:
+      KmsMasterKeyId: !GetAtt AlertsKey.Arn
+
+  FlyerDLQ:
+    Type: AWS::SQS::Queue
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Retains failed asynchronous flyer extraction invocations for investigation and replay.
+        must:
+          - Keep retention longer than the source retry window
+        mutable: free-to-tune
+    Properties:
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Single AppSync resolver Lambda keeps the MVP small while preserving field-level routing and a clean split from flyer processing.
+        must:
+          - Return GraphQL field shapes defined in schema.graphql
+        mutable: change-with-constraints
+    Properties:
+      CodeUri: functions/api/
+      Handler: index.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventsTable
+        - S3WritePolicy:
+            BucketName: !Ref FlyersBucket
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertsTopic.TopicName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource: '*'
+
+  FlyerProcessorFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Processes uploaded flyer images asynchronously so image extraction cannot delay the interactive API.
+        must:
+          - Read each S3 response stream exactly once
+          - Publish alerts only after a successful DynamoDB write
+        mutable: change-with-constraints
+    Properties:
+      CodeUri: functions/flyer/
+      Handler: index.handler
+      Timeout: 60
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt FlyerDLQ.Arn
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventsTable
+        - S3ReadPolicy:
+            BucketName: !Ref FlyersBucket
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertsTopic.TopicName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt FlyerDLQ.QueueName
+        - Statement:
+            - Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource: '*'
+      Events:
+        FlyerUploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref FlyersBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: incoming/
+
+  GraphQLApi:
+    Type: AWS::AppSync::GraphQLApi
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Managed GraphQL front door provides real-time subscriptions and a stable typed API for web and mobile clients.
+        must:
+          - Keep API key as temporary demo auth only; replace with Cognito before handling private user data
+        mutable: review-required
+    Properties:
+      Name: !Sub '${AWS::StackName}-graphql'
+      AuthenticationType: API_KEY
+      XrayEnabled: true
+      LogConfig:
+        CloudWatchLogsRoleArn: !GetAtt AppSyncLogsRole.Arn
+        FieldLogLevel: ERROR
+        ExcludeVerboseContent: true
+
+  GraphQLSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Definition: |
+        scalar AWSDateTime
+        type Event { id: ID!, title: String!, time: String!, clock: String!, startsAt: AWSDateTime, location: String!, distance: String, category: String!, description: String!, imageKey: String, people: Int!, source: String!, createdAt: AWSDateTime! }
+        type EventConnection { items: [Event!]!, nextToken: String }
+        type HillAnswer { answer: String!, eventIds: [ID!]! }
+        type FlyerUpload { uploadUrl: AWSURL!, objectKey: String!, expiresIn: Int! }
+        input CreateHangoutInput { title: String!, time: String!, clock: String!, startsAt: AWSDateTime, location: String!, category: String!, description: String }
+        input PreferencesInput { userId: ID!, interests: [String!]!, alertsEnabled: Boolean! }
+        type PreferenceResult { userId: ID!, interests: [String!]!, alertsEnabled: Boolean!, updatedAt: AWSDateTime! }
+        type Query { listEvents(category: String, limit: Int, nextToken: String): EventConnection!, getEvent(id: ID!): Event, askHill(message: String!, userId: ID): HillAnswer! }
+        type Mutation { createHangout(input: CreateHangoutInput!): Event!, createFlyerUpload(fileName: String!, contentType: String!): FlyerUpload!, updatePreferences(input: PreferencesInput!): PreferenceResult! }
+        type Subscription { onEventCreated: Event @aws_subscribe(mutations: ["createHangout"]) }
+
+  GraphQLApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Description: !Sub 'Hill ${Environment} browser key'
+
+  AppSyncLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AppSyncLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/appsync/apis/*'
+
+  AppSyncLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeResolver
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ApiFunction.Arn
+
+  LambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: HillLambda
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt ApiFunction.Arn
+
+  QueryListEventsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: listEvents
+      DataSourceName: !GetAtt LambdaDataSource.Name
+
+  QueryGetEventResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: getEvent
+      DataSourceName: !GetAtt LambdaDataSource.Name
+
+  QueryAskHillResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: askHill
+      DataSourceName: !GetAtt LambdaDataSource.Name
+
+  MutationCreateHangoutResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Mutation
+      FieldName: createHangout
+      DataSourceName: !GetAtt LambdaDataSource.Name
+
+  MutationCreateFlyerUploadResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Mutation
+      FieldName: createFlyerUpload
+      DataSourceName: !GetAtt LambdaDataSource.Name
+
+  MutationUpdatePreferencesResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Mutation
+      FieldName: updatePreferences
+      DataSourceName: !GetAtt LambdaDataSource.Name
+
+Outputs:
+  GraphQLApiUrl:
+    Description: AppSync GraphQL endpoint for the Hill frontend.
+    Value: !GetAtt GraphQLApi.GraphQLUrl
+  GraphQLApiKey:
+    Description: Demo browser API key; replace API key auth with Cognito before production user data.
+    Value: !GetAtt GraphQLApiKey.ApiKey
+  FlyersBucketName:
+    Description: Private S3 bucket receiving flyer images.
+    Value: !Ref FlyersBucket
+  AlertsTopicArn:
+    Description: SNS topic ARN for interest-match alerts.
+    Value: !Ref AlertsTopic

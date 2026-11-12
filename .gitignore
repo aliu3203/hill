@@ -1,0 +1,5 @@
+node_modules/
+.aws-sam/
+packaged-template.yaml
+*.zip
+*.tar.gz

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1d1a2c" />
+  <meta name="description" content="Hill helps UCLA students discover what's happening nearby, meet their people, and turn any flyer into an event." />
+  <title>Hill - Find your people</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to events</a>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Hill home">Hill<span class="brand-dot">.</span></a>
+      <label class="search-wrap" for="search">
+        <span aria-hidden="true">⌕</span>
+        <input id="search" type="search" placeholder="Search events, clubs, or vibes" autocomplete="off" />
+        <kbd>⌘ K</kbd>
+      </label>
+      <nav class="top-actions" aria-label="Account">
+        <button class="icon-button notification-button" id="notificationButton" aria-label="Notifications"><span>♢</span><i></i></button>
+        <button class="avatar-button" id="profileButton" aria-label="Open profile"><span>KM</span></button>
+      </nav>
+    </header>
+
+    <aside class="sidebar" aria-label="Primary navigation">
+      <nav>
+        <button class="nav-item active" data-view="discover"><span>⌾</span><b>Discover</b></button>
+        <button class="nav-item" data-view="map"><span>⌖</span><b>Live map</b></button>
+        <button class="nav-item" data-view="hangouts"><span>◌</span><b>Hangouts</b></button>
+        <button class="nav-item" data-view="saved"><span>◇</span><b>Saved</b><em id="savedCount">2</em></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <button class="scan-button" id="scanButton"><span>✦</span><b>Scan a flyer</b><small>AI adds it in seconds</small></button>
+        <button class="ask-button" id="askButton"><span class="spark">✦</span><span><b>Ask Hill</b><small>Find something for me</small></span><span>›</span></button>
+      </div>
+    </aside>
+
+    <main id="main" class="main-content">
+      <section class="hero" aria-labelledby="greeting">
+        <div>
+          <p class="eyebrow" id="dateLabel">THURSDAY, NOVEMBER 12</p>
+          <h1 id="greeting">Hey Kenz, what's the move?</h1>
+          <p>Everything happening around the Hill, right now.</p>
+        </div>
+        <button class="create-button" id="createButton"><span>＋</span> Create a hangout</button>
+      </section>
+
+      <section class="filter-row" aria-label="Event filters">
+        <button class="filter active" data-filter="all">For you</button>
+        <button class="filter" data-filter="now">Happening now</button>
+        <button class="filter" data-filter="today">Today</button>
+        <button class="filter" data-filter="free">Free</button>
+        <button class="filter" data-filter="food">Food</button>
+        <button class="filter" data-filter="music">Music</button>
+        <button class="filter" data-filter="wellness">Wellness</button>
+      </section>
+
+      <section class="content-grid">
+        <div class="events-column">
+          <div class="section-heading">
+            <div><span class="live-dot"></span><h2>Happening now</h2></div>
+            <button class="text-button" data-view-link="map">See on map <span>→</span></button>
+          </div>
+          <div class="event-grid" id="eventGrid" aria-live="polite"></div>
+
+          <div class="section-heading later-heading">
+            <div><h2>Later today</h2></div>
+            <span class="event-total" id="eventTotal"></span>
+          </div>
+          <div class="timeline" id="timeline"></div>
+        </div>
+
+        <aside class="right-rail">
+          <section class="map-card" aria-labelledby="mapTitle">
+            <div class="map-card-head"><div><span class="live-dot"></span><h2 id="mapTitle">Live on the Hill</h2></div><button class="expand-map" data-view-link="map" aria-label="Expand map">↗</button></div>
+            <div class="mini-map" id="miniMap" role="img" aria-label="Stylized map of UCLA's Hill with nearby events">
+              <div class="road road-a"></div><div class="road road-b"></div><div class="road road-c"></div>
+              <span class="place place-a">RIEBER</span><span class="place place-b">SPROUL</span><span class="place place-c">SUNSET</span><span class="place place-d">DE NEVE</span>
+              <button class="map-pin pin-1" data-event="boba" aria-label="Boba run at Rieber">🧋</button>
+              <button class="map-pin pin-2" data-event="sunset" aria-label="Sunset yoga at Sunset Rec">🧘</button>
+              <button class="map-pin pin-3" data-event="jam" aria-label="Courtyard jam at De Neve">♫</button>
+              <span class="you-dot"><i></i></span>
+            </div>
+            <div class="map-legend"><span><i class="legend-you"></i>You</span><span><i class="legend-event"></i>3 events nearby</span></div>
+          </section>
+
+          <section class="match-card">
+            <span class="match-icon">✦</span>
+            <div><p>YOUR BEST MATCH</p><h3>Sunset yoga + smoothies</h3><span>98% match · starts in 25 min</span></div>
+            <button data-event="sunset" aria-label="View best match">›</button>
+          </section>
+
+          <section class="digest-card">
+            <div><span>FOR YOU</span><button class="toggle on" id="alertToggle" role="switch" aria-checked="true" aria-label="Personalized alerts"><i></i></button></div>
+            <h3>Never miss your kind of thing.</h3>
+            <p>Hill will nudge you when a new event matches your interests.</p>
+          </section>
+        </aside>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="eventDialog" class="modal event-modal">
+    <button class="close-button" data-close aria-label="Close">×</button>
+    <div id="eventDialogBody"></div>
+  </dialog>
+
+  <dialog id="createDialog" class="modal form-modal">
+    <button class="close-button" data-close aria-label="Close">×</button>
+    <p class="modal-eyebrow">MAKE A PLAN</p>
+    <h2>Create a hangout</h2>
+    <p class="modal-copy">Keep it casual. Tell people what, where, and when.</p>
+    <form id="hangoutForm">
+      <label>What's the move?<input name="title" required placeholder="Boba at 8" /></label>
+      <div class="form-row"><label>Where?<input name="location" required placeholder="Rieber lobby" /></label><label>When?<input name="time" type="time" required value="20:00" /></label></div>
+      <label>What’s the vibe?<select name="tag"><option>Food</option><option>Chill</option><option>Study</option><option>Music</option><option>Wellness</option></select></label>
+      <button class="primary-button" type="submit">Post hangout</button>
+    </form>
+  </dialog>
+
+  <dialog id="scanDialog" class="modal scan-modal">
+    <button class="close-button" data-close aria-label="Close">×</button>
+    <div class="scan-intro"><span class="scan-spark">✦</span><p class="modal-eyebrow">POWERED BY AI</p><h2>Turn any flyer into an event.</h2><p>Upload a photo. Hill pulls out the title, time, place, and details.</p></div>
+    <label class="drop-zone" id="dropZone"><input id="flyerInput" type="file" accept="image/*" /><span>↑</span><b>Drop a flyer here</b><small>or choose a photo</small></label>
+    <div class="scan-progress" id="scanProgress" hidden><div><i></i></div><p id="scanStatus">Reading your flyer...</p></div>
+    <div class="scan-result" id="scanResult" hidden><span>✓</span><div><p>EVENT FOUND</p><h3>Hill Game Night</h3><small>8:00 PM · Covel Commons · Free</small></div><button id="addScannedEvent">Add event</button></div>
+  </dialog>
+
+  <aside class="chat-panel" id="chatPanel" aria-hidden="true" aria-label="Ask Hill">
+    <div class="chat-head"><div><span>✦</span><div><b>Ask Hill</b><small>Usually replies instantly</small></div></div><button id="closeChat" aria-label="Close Ask Hill">×</button></div>
+    <div class="chat-body" id="chatBody">
+      <div class="bot-message"><span>✦</span><p>Hey! What kind of plan are you looking for?</p></div>
+      <div class="suggestions"><button>Something chill nearby</button><button>Free food tonight</button><button>Meet new people</button></div>
+    </div>
+    <form class="chat-form" id="chatForm"><input id="chatInput" aria-label="Message Ask Hill" placeholder="Ask anything about the Hill..." autocomplete="off" /><button type="submit" aria-label="Send message">↑</button></form>
+  </aside>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="config.js"></script>
+  <script src="aws-api.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

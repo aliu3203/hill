@@ -1,0 +1,72 @@
+scalar AWSDateTime
+
+type Event {
+  id: ID!
+  title: String!
+  time: String!
+  clock: String!
+  startsAt: AWSDateTime
+  location: String!
+  distance: String
+  category: String!
+  description: String!
+  imageKey: String
+  people: Int!
+  source: String!
+  createdAt: AWSDateTime!
+}
+
+type EventConnection {
+  items: [Event!]!
+  nextToken: String
+}
+
+type HillAnswer {
+  answer: String!
+  eventIds: [ID!]!
+}
+
+type FlyerUpload {
+  uploadUrl: AWSURL!
+  objectKey: String!
+  expiresIn: Int!
+}
+
+input CreateHangoutInput {
+  title: String!
+  time: String!
+  clock: String!
+  startsAt: AWSDateTime
+  location: String!
+  category: String!
+  description: String
+}
+
+input PreferencesInput {
+  userId: ID!
+  interests: [String!]!
+  alertsEnabled: Boolean!
+}
+
+type PreferenceResult {
+  userId: ID!
+  interests: [String!]!
+  alertsEnabled: Boolean!
+  updatedAt: AWSDateTime!
+}
+
+type Query {
+  listEvents(category: String, limit: Int, nextToken: String): EventConnection!
+  getEvent(id: ID!): Event
+  askHill(message: String!, userId: ID): HillAnswer!
+}
+
+type Mutation {
+  createHangout(input: CreateHangoutInput!): Event!
+  createFlyerUpload(fileName: String!, contentType: String!): FlyerUpload!
+  updatePreferences(input: PreferencesInput!): PreferenceResult!
+}
+
+type Subscription {
+  onEventCreated: Event @aws_subscribe(mutations: ["createHangout"])
+}
