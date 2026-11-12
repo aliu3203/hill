@@ -104,13 +104,13 @@ At this scale the whole event list fits in the prompt, and letting the model rea
 
 ```mermaid
 flowchart LR
-    P[Post published] --> T[Tags assigned<br/>by Claude]
-    T --> S[DynamoDB Stream]
-    S --> M[matchAndNotify]
-    M --> Q{User interests<br/>overlap tags?}
-    Q -- yes --> N[Create Notification]
-    N --> I[In-app badge]
-    N --> E[Email, if opted in]
+    P["Post published"] --> T["Tags assigned by Claude"]
+    T --> S["DynamoDB Stream"]
+    S --> M["matchAndNotify"]
+    M --> Q{"User interests overlap tags?"}
+    Q -->|"yes"| N["Create Notification"]
+    N --> I["In-app badge"]
+    N --> E["Email, if opted in"]
 ```
 
 **The model's part happens once per post, at publish time.** For flyer scans the tags come from the extraction call. For manually written posts, `publishEvent` makes one small call that returns tags and a safety verdict together. The user can change the tags before posting.

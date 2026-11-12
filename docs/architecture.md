@@ -16,25 +16,43 @@ This is the Node.js + React stack you had in mind, with one adjustment: the Node
 
 ```mermaid
 flowchart LR
-    U[Student<br/>phone or laptop browser] --> H[Amplify Hosting<br/>React PWA]
-    U --> C[Cognito<br/>@ucla.edu sign-in]
-    U --> A[AppSync<br/>GraphQL + real-time]
-    U -- map tiles --> L[Location Service]
-    U -- flyer upload --> S3[(S3<br/>flyer photos)]
+    U["Student: phone or laptop browser"]
+    H["Amplify Hosting: React PWA"]
+    C["Cognito: UCLA email sign-in"]
+    A["AppSync: GraphQL and real-time"]
+    L["Location Service"]
+    S3[("S3: flyer photos")]
+    D[("DynamoDB")]
+    Q["SQS"]
+    B["Bedrock: Claude"]
+    SES["SES email"]
+    EB["EventBridge Scheduler"]
+    F1["Lambda: askHill"]
+    F2["Lambda: icsExport"]
+    F3["Lambda: flyerExtract"]
+    F4["Lambda: matchAndNotify"]
+    F5["Lambda: digest and reminders"]
 
-    A --> D[(DynamoDB)]
-    A --> F1[Lambda: askHill]
-    A --> F2[Lambda: icsExport]
+    U --> H
+    U --> C
+    U --> A
+    U -->|"map tiles"| L
+    U -->|"flyer upload"| S3
 
-    S3 --> Q[SQS] --> F3[Lambda: flyerExtract]
-    D -- Streams --> F4[Lambda: matchAndNotify]
-    EB[EventBridge Scheduler] --> F5[Lambda: digest / reminders]
+    A --> D
+    A --> F1
+    A --> F2
 
-    F1 --> B[Bedrock<br/>Claude]
+    S3 --> Q
+    Q --> F3
+    D -->|"Streams"| F4
+    EB --> F5
+
+    F1 --> B
     F3 --> B
     F3 --> A
     F4 --> A
-    F4 --> SES[SES email]
+    F4 --> SES
     F5 --> SES
 ```
 
