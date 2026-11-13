@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check dist/app.js && node --check dist/aws-api.js && node --check infra/functions/api/index.mjs && node --check infra/functions/flyer/index.mjs",
+    "check": "node --check dist/app.js && node --check dist/auth.js && node --check dist/aws-api.js && node --check infra/functions/api/index.mjs && node --check infra/functions/flyer/index.mjs && node --check infra/functions/presignup/index.mjs",
+    "test": "node --test \"tests/**/*.test.mjs\"",
     "configure:frontend": "node scripts/configure-frontend.mjs"
   }
 }

@@ -10,6 +10,8 @@ let activeFilter = 'all';
 let currentView = 'discover';
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+// Escape anything that can come from users (hangout titles, flyer text) before putting it in HTML.
+const h = value => escapeHtml(String(value ?? ''));
 const eventGrid = $('#eventGrid');
 const timeline = $('#timeline');
 const eventDialog = $('#eventDialog');
@@ -27,17 +29,17 @@ function renderEvents() {
   const featured = visible.slice(0, 2);
   const later = visible.slice(2);
   eventGrid.innerHTML = featured.length ? featured.map(eventCard).join('') : `<div class="empty-state"><b>No plans found</b>Try another filter or ask Hill for an idea.</div>`;
-  timeline.innerHTML = later.map(e => `<article class="timeline-event" data-event="${e.id}" tabindex="0"><time>${e.clock}</time><div><h3>${e.title}</h3><p>${e.location} · ${e.distance}</p></div><span class="tag">${e.tags.includes('free') ? 'FREE' : e.tags[0].toUpperCase()}</span></article>`).join('');
+  timeline.innerHTML = later.map(e => `<article class="timeline-event" data-event="${h(e.id)}" tabindex="0"><time>${h(e.clock)}</time><div><h3>${h(e.title)}</h3><p>${h(e.location)} · ${h(e.distance)}</p></div><span class="tag">${e.tags.includes('free') ? 'FREE' : h(String(e.tags[0] || 'event').toUpperCase())}</span></article>`).join('');
   $('#eventTotal').textContent = `${visible.length} picks for you`;
   $('#savedCount').textContent = events.filter(e => e.saved).length;
   bindEventTargets();
 }
 
 function eventCard(e) {
-  return `<article class="event-card" data-event="${e.id}" tabindex="0">
-    <div class="event-visual visual-${e.visual}"><span class="status-badge"><i></i>${e.time.toUpperCase()}</span><span class="event-emoji">${e.emoji}</span></div>
-    <div class="event-info"><h3>${e.title}</h3><div class="event-meta"><span>⌖ ${e.location}</span><span>↗ ${e.distance}</span></div>
-      <div class="event-footer"><div class="people">${e.initials.map(i=>`<i>${i}</i>`).join('')}<small>+${e.people} going</small></div><button class="save-event ${e.saved?'saved':''}" data-save="${e.id}" aria-label="${e.saved?'Unsave':'Save'} ${e.title}">${e.saved?'◆':'◇'}</button></div>
+  return `<article class="event-card" data-event="${h(e.id)}" tabindex="0">
+    <div class="event-visual visual-${h(e.visual)}"><span class="status-badge"><i></i>${h(String(e.time).toUpperCase())}</span><span class="event-emoji">${h(e.emoji)}</span></div>
+    <div class="event-info"><h3>${h(e.title)}</h3><div class="event-meta"><span>⌖ ${h(e.location)}</span><span>↗ ${h(e.distance)}</span></div>
+      <div class="event-footer"><div class="people">${e.initials.map(i=>`<i>${h(i)}</i>`).join('')}<small>+${h(e.people)} going</small></div><button class="save-event ${e.saved?'saved':''}" data-save="${h(e.id)}" aria-label="${e.saved?'Unsave':'Save'} ${h(e.title)}">${e.saved?'◆':'◇'}</button></div>
     </div></article>`;
 }
 
@@ -51,7 +53,7 @@ function bindEventTargets() {
 
 function openEvent(id) {
   const e = events.find(x => x.id === id); if (!e) return;
-  $('#eventDialogBody').innerHTML = `<div class="event-detail-hero visual-${e.visual}"><span>${e.emoji}</span></div><p class="modal-eyebrow">${e.match}% MATCH FOR YOU</p><h2>${e.title}</h2><div class="detail-meta"><p>◷ ${e.clock} · ${e.time}</p><p>⌖ ${e.location} · ${e.distance}</p><p>◎ ${e.people} people are going</p></div><p class="detail-description">${e.description}</p><div class="detail-actions"><button data-calendar="${e.id}">Add to calendar</button><button class="going-button" data-going="${e.id}">I’m going</button></div>`;
+  $('#eventDialogBody').innerHTML = `<div class="event-detail-hero visual-${h(e.visual)}"><span>${h(e.emoji)}</span></div><p class="modal-eyebrow">${h(e.match)}% MATCH FOR YOU</p><h2>${h(e.title)}</h2><div class="detail-meta"><p>◷ ${h(e.clock)} · ${h(e.time)}</p><p>⌖ ${h(e.location)} · ${h(e.distance)}</p><p>◎ ${h(e.people)} people are going</p></div><p class="detail-description">${h(e.description)}</p><div class="detail-actions"><button data-calendar="${h(e.id)}">Add to calendar</button><button class="going-button" data-going="${h(e.id)}">I’m going</button></div>`;
   eventDialog.showModal();
   $('[data-calendar]').onclick = () => downloadICS(e);
   $('[data-going]').onclick = () => { e.people++; eventDialog.close(); showToast(`You're in for ${e.title}!`); renderEvents(); };
@@ -79,7 +81,7 @@ function changeView(view) {
 $('#search').addEventListener('input', renderEvents);
 document.addEventListener('keydown', e => { if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==='k') { e.preventDefault(); $('#search').focus(); } if (e.key==='Escape') $('#chatPanel').classList.remove('open'); });
 $$('[data-close]').forEach(btn => btn.onclick = () => btn.closest('dialog').close());
-$('#createButton').onclick = () => $('#createDialog').showModal();
+$('#createButton').onclick = () => withLogin(() => $('#createDialog').showModal(), 'Sign in to post a hangout.');
 $('#hangoutForm').onsubmit = async e => {
   e.preventDefault();
   const data = new FormData(e.target);
@@ -105,11 +107,12 @@ $('#hangoutForm').onsubmit = async e => {
     renderEvents();
     showToast('Your hangout is live!');
   } catch (error) {
+    if (error.code === 'LOGIN_REQUIRED') { $('#createDialog').close(); openAuth('signin', 'Your session expired. Sign in again to post.'); return; }
     showToast(error.message || 'Could not post the hangout');
   }
 };
 
-$('#scanButton').onclick = () => $('#scanDialog').showModal();
+$('#scanButton').onclick = () => withLogin(() => $('#scanDialog').showModal(), 'Sign in to scan a flyer.');
 const flyerInput = $('#flyerInput');
 flyerInput.onchange = async () => {
   if (!flyerInput.files.length) return;
@@ -137,17 +140,175 @@ flyerInput.onchange = async () => {
 $('#addScannedEvent').onclick = () => { if (!events.some(e=>e.id==='scanned-game')) events.unshift({...events.find(e=>e.id==='game'),id:'scanned-game',title:'Hill Game Night · from flyer'}); $('#scanDialog').close(); renderEvents(); showToast('Flyer event added to Hill'); };
 
 const alertToggle = $('#alertToggle');
-alertToggle.onclick = async () => { alertToggle.classList.toggle('on'); const on=alertToggle.classList.contains('on'); alertToggle.setAttribute('aria-checked',on); try { if (window.HillApi?.enabled) await window.HillApi.updatePreferences(['food','music','wellness'], on); showToast(on?'Personalized alerts are on':'Personalized alerts paused'); } catch (error) { alertToggle.classList.toggle('on'); alertToggle.setAttribute('aria-checked',!on); showToast(error.message || 'Could not update alerts'); } };
+alertToggle.onclick = () => withLogin(toggleAlerts, 'Sign in to get alerts that match your interests.');
+async function toggleAlerts() { alertToggle.classList.toggle('on'); const on=alertToggle.classList.contains('on'); alertToggle.setAttribute('aria-checked',on); try { if (window.HillApi?.enabled) await window.HillApi.updatePreferences(['food','music','wellness'], on); showToast(on?'Personalized alerts are on':'Personalized alerts paused'); } catch (error) { alertToggle.classList.toggle('on'); alertToggle.setAttribute('aria-checked',!on); showToast(error.message || 'Could not update alerts'); } }
 $('#notificationButton').onclick = () => showToast('Sunset yoga starts in 25 minutes');
-$('#profileButton').onclick = () => showToast('Profile and interests are coming next');
+$('#profileButton').onclick = () => {
+  if (!window.HillAuth?.enabled) { showToast('Profile and interests are coming next'); return; }
+  openAuth(window.HillAuth.getUser() ? 'account' : 'signin');
+};
 
 const chatPanel = $('#chatPanel');
 function openChat(prefill='') { chatPanel.classList.add('open'); chatPanel.setAttribute('aria-hidden','false'); if (prefill) { $('#chatInput').value=prefill; sendChat(prefill); } setTimeout(()=>$('#chatInput').focus(),220); }
-$('#askButton').onclick = () => openChat(); $('#closeChat').onclick = () => { chatPanel.classList.remove('open'); chatPanel.setAttribute('aria-hidden','true'); };
+$('#askButton').onclick = () => withLogin(() => openChat(), 'Sign in to ask Hill for ideas.'); $('#closeChat').onclick = () => { chatPanel.classList.remove('open'); chatPanel.setAttribute('aria-hidden','true'); };
 $$('.suggestions button').forEach(btn => btn.onclick = () => sendChat(btn.textContent));
 $('#chatForm').onsubmit = e => { e.preventDefault(); const q=$('#chatInput').value.trim(); if(q) sendChat(q); };
 async function sendChat(q) { const body=$('#chatBody'); body.insertAdjacentHTML('beforeend',`<div class="user-message"><p>${escapeHtml(q)}</p></div>`); $('#chatInput').value=''; body.scrollTop=body.scrollHeight; let answer; try { if (window.HillApi?.enabled) { answer = (await window.HillApi.askHill(q)).answer; } else { const lower=q.toLowerCase(); answer='Sunset yoga + smoothies is your best match - it’s free, six minutes away, and starts in 25 minutes.'; if(lower.includes('food')) answer='Boba at Rieber is happening now, and there’s a free snack table at Game Night later.'; else if(lower.includes('people')||lower.includes('meet')) answer='The courtyard jam is friendly for solo drop-ins. Nine people are already going.'; else if(lower.includes('music')) answer='Courtyard jam at De Neve starts at 8. Want me to save it?'; } } catch (error) { answer = error.message || 'I could not reach the event service right now.'; } body.insertAdjacentHTML('beforeend',`<div class="bot-message"><span>✦</span><p>${escapeHtml(answer)}</p></div>`); body.scrollTop=body.scrollHeight; }
 function escapeHtml(s) { return s.replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+
+// ---------------------------------------------------------------------------
+// Sign-in (UCLA email + verification code). Logic lives in auth.js; this is the UI.
+// ---------------------------------------------------------------------------
+const auth = window.HillAuth;
+const authDialog = $('#authDialog');
+const authCopy = {
+  signin: ['UCLA STUDENTS ONLY', 'Sign in to Hill', 'Use your @ucla.edu or @g.ucla.edu email.'],
+  signup: ['UCLA STUDENTS ONLY', 'Create your account', 'Only @ucla.edu and @g.ucla.edu emails can join. We’ll email you a code to verify.'],
+  verify: ['ONE MORE STEP', 'Check your email', 'Enter the 6-digit code we sent you.'],
+  forgot: ['RESET PASSWORD', 'Forgot your password?', 'We’ll email a reset code to your UCLA address.'],
+  reset: ['RESET PASSWORD', 'Choose a new password', 'Enter the code from your email and a new password.'],
+  account: ['YOUR ACCOUNT', 'Signed in', 'You can post hangouts, scan flyers, and get alerts.'],
+};
+let pendingEmail = '';
+let pendingPassword = '';
+let afterLogin = null;
+
+function withLogin(action, reason) {
+  if (!auth?.enabled || auth.getUser()) return action();
+  afterLogin = action;
+  openAuth('signin', reason);
+}
+
+function setAuthMessage(text, kind = 'error') {
+  const box = $('#authMessage');
+  box.hidden = !text;
+  box.textContent = text || '';
+  box.classList.toggle('success', kind === 'success');
+}
+
+function showAuthStep(step, message, kind) {
+  $$('.auth-step', authDialog).forEach(el => { el.hidden = el.dataset.step !== step; });
+  const [eyebrow, title, copy] = authCopy[step];
+  $('#authEyebrow').textContent = eyebrow;
+  $('#authTitle').textContent = title;
+  $('#authCopy').textContent = step === 'verify' && pendingEmail ? `Enter the 6-digit code we sent to ${pendingEmail}.` : copy;
+  setAuthMessage(message, kind);
+  if (step === 'account') {
+    const user = auth.getUser();
+    $('#accountName').textContent = user?.name || 'Bruin';
+    $('#accountEmail').textContent = user?.email || '';
+    $('#accountAvatar').textContent = initialsFor(user);
+  }
+  const form = $(`.auth-step[data-step="${step}"]`, authDialog);
+  const emailField = form?.querySelector('input[name="email"]');
+  if (emailField && pendingEmail && !emailField.value) emailField.value = pendingEmail;
+  setTimeout(() => form?.querySelector('input:not([value]), input')?.focus(), 30);
+}
+
+function openAuth(step = 'signin', message) {
+  showAuthStep(step, message, 'success');
+  if (!authDialog.open) authDialog.showModal();
+}
+
+async function runAuthStep(form, task) {
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  setAuthMessage('');
+  try { await task(new FormData(form)); }
+  catch (error) { setAuthMessage(error.message || 'Something went wrong. Please try again.'); }
+  finally { button.disabled = false; }
+}
+
+function requireFields(data, names) {
+  for (const name of names) if (!String(data.get(name) || '').trim()) throw new Error('Please fill in every field.');
+}
+
+$('.auth-step[data-step="signin"]').onsubmit = e => { e.preventDefault(); runAuthStep(e.target, async data => {
+  requireFields(data, ['email', 'password']);
+  pendingEmail = String(data.get('email')).trim().toLowerCase();
+  try {
+    await auth.signIn({ email: pendingEmail, password: data.get('password') });
+  } catch (error) {
+    if (error.code !== 'UserNotConfirmedException') throw error;
+    pendingPassword = String(data.get('password'));
+    await auth.resendCode(pendingEmail);
+    showAuthStep('verify', 'Your email isn’t verified yet, so we sent you a new code.', 'success');
+    return;
+  }
+  finishSignIn();
+}); };
+
+$('.auth-step[data-step="signup"]').onsubmit = e => { e.preventDefault(); runAuthStep(e.target, async data => {
+  requireFields(data, ['name', 'email', 'password']);
+  const email = String(data.get('email')).trim().toLowerCase();
+  if (!auth.isAllowedEmail(email)) throw new Error('Hill is for UCLA students. Use your @ucla.edu or @g.ucla.edu email.');
+  pendingEmail = email;
+  pendingPassword = String(data.get('password'));
+  await auth.signUp({ email, password: pendingPassword, name: String(data.get('name')) });
+  showAuthStep('verify');
+}); };
+
+$('.auth-step[data-step="verify"]').onsubmit = e => { e.preventDefault(); runAuthStep(e.target, async data => {
+  const code = String(data.get('code') || '').trim();
+  if (!/^\d{6}$/.test(code)) throw new Error('Enter the 6-digit code from your email.');
+  await auth.confirmSignUp({ email: pendingEmail, code });
+  if (pendingPassword) {
+    await auth.signIn({ email: pendingEmail, password: pendingPassword });
+    finishSignIn('Email verified. Welcome to Hill!');
+  } else {
+    showAuthStep('signin', 'Email verified! Sign in to continue.', 'success');
+  }
+}); };
+
+$('#resendCode').onclick = async () => {
+  if (!pendingEmail) { showAuthStep('signin'); return; }
+  try { await auth.resendCode(pendingEmail); setAuthMessage(`New code sent to ${pendingEmail}.`, 'success'); }
+  catch (error) { setAuthMessage(error.message); }
+};
+
+$('.auth-step[data-step="forgot"]').onsubmit = e => { e.preventDefault(); runAuthStep(e.target, async data => {
+  requireFields(data, ['email']);
+  pendingEmail = String(data.get('email')).trim().toLowerCase();
+  if (!auth.isAllowedEmail(pendingEmail)) throw new Error('Enter the UCLA email you signed up with.');
+  await auth.forgotPassword(pendingEmail);
+  showAuthStep('reset', `If ${pendingEmail} has an account, a reset code is on its way.`, 'success');
+}); };
+
+$('.auth-step[data-step="reset"]').onsubmit = e => { e.preventDefault(); runAuthStep(e.target, async data => {
+  requireFields(data, ['code', 'password']);
+  await auth.confirmForgotPassword({ email: pendingEmail, code: data.get('code'), password: data.get('password') });
+  showAuthStep('signin', 'Password updated. Sign in with your new password.', 'success');
+}); };
+
+$$('[data-goto]', authDialog).forEach(btn => btn.onclick = () => showAuthStep(btn.dataset.goto));
+authDialog.addEventListener('close', () => { $$('form', authDialog).forEach(f => f.reset()); pendingPassword = ''; afterLogin = null; });
+
+$('#signOutButton').onclick = async () => { await auth.signOut(); authDialog.close(); showToast('Signed out'); };
+
+function finishSignIn(message) {
+  const next = afterLogin;
+  afterLogin = null;
+  pendingPassword = '';
+  authDialog.close();
+  showToast(message || `Welcome back, ${auth.getUser()?.name || 'Bruin'}!`);
+  if (next) setTimeout(next, 150);
+}
+
+function initialsFor(user) {
+  if (!user) return '?';
+  const source = user.name || user.email || '';
+  return source.slice(0, 2).toUpperCase();
+}
+
+function renderUser() {
+  if (!auth?.enabled) return;
+  const user = auth.getUser();
+  $('#profileButton span').textContent = user ? initialsFor(user) : '→';
+  $('#profileButton').setAttribute('aria-label', user ? `Account: ${user.email}` : 'Sign in');
+  $('#greeting').textContent = user ? `Hey ${user.name}, what's the move?` : `Hey Bruin, what's the move?`;
+}
+auth?.onChange(renderUser);
+renderUser();
 
 $('#dateLabel').textContent = new Intl.DateTimeFormat('en-US',{weekday:'long',month:'long',day:'numeric'}).format(new Date()).toUpperCase();
 renderEvents();

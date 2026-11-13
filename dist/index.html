@@ -23,7 +23,7 @@
       </label>
       <nav class="top-actions" aria-label="Account">
         <button class="icon-button notification-button" id="notificationButton" aria-label="Notifications"><span>♢</span><i></i></button>
-        <button class="avatar-button" id="profileButton" aria-label="Open profile"><span>KM</span></button>
+        <button class="avatar-button" id="profileButton" aria-label="Sign in"><span>KM</span></button>
       </nav>
     </header>
 
@@ -131,6 +131,53 @@
     <div class="scan-result" id="scanResult" hidden><span>✓</span><div><p>EVENT FOUND</p><h3>Hill Game Night</h3><small>8:00 PM · Covel Commons · Free</small></div><button id="addScannedEvent">Add event</button></div>
   </dialog>
 
+  <dialog id="authDialog" class="modal form-modal auth-modal" aria-labelledby="authTitle">
+    <button class="close-button" data-close aria-label="Close">×</button>
+    <p class="modal-eyebrow" id="authEyebrow">UCLA STUDENTS ONLY</p>
+    <h2 id="authTitle">Sign in to Hill</h2>
+    <p class="modal-copy" id="authCopy">Use your @ucla.edu or @g.ucla.edu email.</p>
+    <p class="auth-message" id="authMessage" role="alert" hidden></p>
+
+    <form class="auth-step" data-step="signin" novalidate>
+      <label>UCLA email<input name="email" type="email" autocomplete="username" required placeholder="joebruin@g.ucla.edu" /></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required minlength="8" /></label>
+      <button class="primary-button" type="submit">Sign in</button>
+      <div class="auth-links"><button type="button" class="link-button" data-goto="forgot">Forgot password?</button><span>New here? <button type="button" class="link-button" data-goto="signup">Create an account</button></span></div>
+    </form>
+
+    <form class="auth-step" data-step="signup" novalidate hidden>
+      <label>First name<input name="name" autocomplete="given-name" required maxlength="60" placeholder="Joe" /></label>
+      <label>UCLA email<input name="email" type="email" autocomplete="username" required placeholder="joebruin@g.ucla.edu" /></label>
+      <label>Password<input name="password" type="password" autocomplete="new-password" required minlength="8" /><small class="field-hint">At least 8 characters, with a lowercase letter and a number.</small></label>
+      <button class="primary-button" type="submit">Create account</button>
+      <div class="auth-links"><span>Already have an account? <button type="button" class="link-button" data-goto="signin">Sign in</button></span></div>
+    </form>
+
+    <form class="auth-step" data-step="verify" novalidate hidden>
+      <label>6-digit code<input name="code" inputmode="numeric" autocomplete="one-time-code" required pattern="[0-9]{6}" maxlength="6" placeholder="123456" class="code-input" /></label>
+      <button class="primary-button" type="submit">Verify email</button>
+      <div class="auth-links"><button type="button" class="link-button" id="resendCode">Resend code</button><button type="button" class="link-button" data-goto="signin">Back to sign in</button></div>
+    </form>
+
+    <form class="auth-step" data-step="forgot" novalidate hidden>
+      <label>UCLA email<input name="email" type="email" autocomplete="username" required placeholder="joebruin@g.ucla.edu" /></label>
+      <button class="primary-button" type="submit">Email me a reset code</button>
+      <div class="auth-links"><button type="button" class="link-button" data-goto="signin">Back to sign in</button></div>
+    </form>
+
+    <form class="auth-step" data-step="reset" novalidate hidden>
+      <label>6-digit code<input name="code" inputmode="numeric" autocomplete="one-time-code" required pattern="[0-9]{6}" maxlength="6" placeholder="123456" class="code-input" /></label>
+      <label>New password<input name="password" type="password" autocomplete="new-password" required minlength="8" /><small class="field-hint">At least 8 characters, with a lowercase letter and a number.</small></label>
+      <button class="primary-button" type="submit">Set new password</button>
+      <div class="auth-links"><button type="button" class="link-button" data-goto="signin">Back to sign in</button></div>
+    </form>
+
+    <div class="auth-step" data-step="account" hidden>
+      <div class="account-card"><span class="account-avatar" id="accountAvatar">H</span><div><b id="accountName">Bruin</b><small id="accountEmail"></small></div><span class="verified-badge">✓ Verified UCLA</span></div>
+      <button class="secondary-button" type="button" id="signOutButton">Sign out</button>
+    </div>
+  </dialog>
+
   <aside class="chat-panel" id="chatPanel" aria-hidden="true" aria-label="Ask Hill">
     <div class="chat-head"><div><span>✦</span><div><b>Ask Hill</b><small>Usually replies instantly</small></div></div><button id="closeChat" aria-label="Close Ask Hill">×</button></div>
     <div class="chat-body" id="chatBody">
@@ -142,6 +189,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="config.js"></script>
+  <script src="auth.js"></script>
   <script src="aws-api.js"></script>
   <script src="app.js"></script>
 </body>
