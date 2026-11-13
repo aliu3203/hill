@@ -31,6 +31,11 @@ Parameters:
     Default: https://hill-ucla-campus-events.kenz-mogannam.chatgpt.site
     Description: Allowed browser origin for direct flyer uploads.
     AllowedPattern: '^https://[^/]+$'
+  AllowedEmailDomains:
+    Type: String
+    Default: ucla.edu,g.ucla.edu
+    Description: Comma-separated email domains allowed to sign up (exact match, no leading @).
+    AllowedPattern: '^[a-z0-9.-]+(,[a-z0-9.-]+)*$'
 
 Globals:
   Function:
@@ -45,8 +50,99 @@ Globals:
         ALERTS_TOPIC_ARN: !Ref AlertsTopic
         FLYERS_BUCKET: !Ref FlyersBucket
         BEDROCK_MODEL_ID: !Ref BedrockModelId
+        ALLOWED_EMAIL_DOMAINS: !Ref AllowedEmailDomains
 
 Resources:
+  PreSignUpFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Rejects any sign-up that is not a UCLA email before Cognito creates the account or sends a code.
+        must:
+          - Never set autoConfirmUser; email verification must stay on
+        mutable: change-with-constraints
+    Properties:
+      CodeUri: functions/presignup/
+      Handler: index.handler
+      MemorySize: 128
+      Timeout: 5
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Student accounts. Email is the username, verified with a 6-digit code sent by Cognito's built-in email (no SES setup; about 50 emails/day).
+        must:
+          - Keep the PreSignUp trigger so only allowed domains can register
+          - Schema changes force replacement; avoid editing Schema after first deploy
+        mutable: review-required
+    Properties:
+      UserPoolName: !Sub '${AWS::StackName}-students'
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      UsernameConfiguration:
+        CaseSensitive: false
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireUppercase: false
+          RequireSymbols: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+        EmailSubject: Your Hill verification code
+        EmailMessage: 'Welcome to Hill! Your verification code is {####}. It expires in 24 hours.'
+      LambdaConfig:
+        PreSignUp: !GetAtt PreSignUpFunction.Arn
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Public browser client. No secret because a static site cannot keep one.
+        mutable: free-to-tune
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub '${AWS::StackName}-web'
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+
+  PreSignUpPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt PreSignUpFunction.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
+
   EventsTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -263,11 +359,17 @@ Resources:
       com.aws.cloudformation.Context:
         why: Managed GraphQL front door provides real-time subscriptions and a stable typed API for web and mobile clients.
         must:
-          - Keep API key as temporary demo auth only; replace with Cognito before handling private user data
+          - Signed-in UCLA students (Cognito) are the default; the API key only reaches fields marked @aws_api_key (public event browsing)
         mutable: review-required
     Properties:
       Name: !Sub '${AWS::StackName}-graphql'
-      AuthenticationType: API_KEY
+      AuthenticationType: AMAZON_COGNITO_USER_POOLS
+      UserPoolConfig:
+        UserPoolId: !Ref UserPool
+        AwsRegion: !Ref AWS::Region
+        DefaultAction: ALLOW
+      AdditionalAuthenticationProviders:
+        - AuthenticationType: API_KEY
       XrayEnabled: true
       LogConfig:
         CloudWatchLogsRoleArn: !GetAtt AppSyncLogsRole.Arn
@@ -278,18 +380,20 @@ Resources:
     Type: AWS::AppSync::GraphQLSchema
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
+      # Keep in sync with infra/schema.graphql.
+      # No directive = signed-in students only. @aws_api_key @aws_cognito_user_pools = guests can read too.
       Definition: |
         scalar AWSDateTime
-        type Event { id: ID!, title: String!, time: String!, clock: String!, startsAt: AWSDateTime, location: String!, distance: String, category: String!, description: String!, imageKey: String, people: Int!, source: String!, createdAt: AWSDateTime! }
-        type EventConnection { items: [Event!]!, nextToken: String }
+        type Event @aws_api_key @aws_cognito_user_pools { id: ID!, title: String!, time: String!, clock: String!, startsAt: AWSDateTime, location: String!, distance: String, category: String!, description: String!, imageKey: String, people: Int!, source: String!, createdAt: AWSDateTime! }
+        type EventConnection @aws_api_key @aws_cognito_user_pools { items: [Event!]!, nextToken: String }
         type HillAnswer { answer: String!, eventIds: [ID!]! }
         type FlyerUpload { uploadUrl: AWSURL!, objectKey: String!, expiresIn: Int! }
         input CreateHangoutInput { title: String!, time: String!, clock: String!, startsAt: AWSDateTime, location: String!, category: String!, description: String }
-        input PreferencesInput { userId: ID!, interests: [String!]!, alertsEnabled: Boolean! }
+        input PreferencesInput { interests: [String!]!, alertsEnabled: Boolean! }
         type PreferenceResult { userId: ID!, interests: [String!]!, alertsEnabled: Boolean!, updatedAt: AWSDateTime! }
-        type Query { listEvents(category: String, limit: Int, nextToken: String): EventConnection!, getEvent(id: ID!): Event, askHill(message: String!, userId: ID): HillAnswer! }
+        type Query { listEvents(category: String, limit: Int, nextToken: String): EventConnection! @aws_api_key @aws_cognito_user_pools, getEvent(id: ID!): Event @aws_api_key @aws_cognito_user_pools, askHill(message: String!): HillAnswer! }
         type Mutation { createHangout(input: CreateHangoutInput!): Event!, createFlyerUpload(fileName: String!, contentType: String!): FlyerUpload!, updatePreferences(input: PreferencesInput!): PreferenceResult! }
-        type Subscription { onEventCreated: Event @aws_subscribe(mutations: ["createHangout"]) }
+        type Subscription { onEventCreated: Event @aws_subscribe(mutations: ["createHangout"]) @aws_api_key @aws_cognito_user_pools }
 
   GraphQLApiKey:
     Type: AWS::AppSync::ApiKey
@@ -407,8 +511,17 @@ Outputs:
     Description: AppSync GraphQL endpoint for the Hill frontend.
     Value: !GetAtt GraphQLApi.GraphQLUrl
   GraphQLApiKey:
-    Description: Demo browser API key; replace API key auth with Cognito before production user data.
+    Description: Browser API key for signed-out visitors; it can only list and read events.
     Value: !GetAtt GraphQLApiKey.ApiKey
+  UserPoolId:
+    Description: Cognito user pool holding verified UCLA student accounts.
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Description: Public app client ID used by the web app to sign up and sign in.
+    Value: !Ref UserPoolClient
+  Region:
+    Description: AWS region the stack runs in (the web app calls Cognito here).
+    Value: !Ref AWS::Region
   FlyersBucketName:
     Description: Private S3 bucket receiving flyer images.
     Value: !Ref FlyersBucket

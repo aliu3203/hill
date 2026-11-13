@@ -1,6 +1,12 @@
+# Reference copy of the schema deployed inline in template.yaml. Keep the two in sync.
+#
+# Who can call what:
+#   - No auth directive  -> only signed-in, verified UCLA students (Cognito, the default).
+#   - @aws_api_key @aws_cognito_user_pools -> signed-out visitors (API key) can call it too.
+
 scalar AWSDateTime
 
-type Event {
+type Event @aws_api_key @aws_cognito_user_pools {
   id: ID!
   title: String!
   time: String!
@@ -16,7 +22,7 @@ type Event {
   createdAt: AWSDateTime!
 }
 
-type EventConnection {
+type EventConnection @aws_api_key @aws_cognito_user_pools {
   items: [Event!]!
   nextToken: String
 }
@@ -42,8 +48,8 @@ input CreateHangoutInput {
   description: String
 }
 
+# The user ID comes from the sign-in token, not from the request.
 input PreferencesInput {
-  userId: ID!
   interests: [String!]!
   alertsEnabled: Boolean!
 }
@@ -56,9 +62,9 @@ type PreferenceResult {
 }
 
 type Query {
-  listEvents(category: String, limit: Int, nextToken: String): EventConnection!
-  getEvent(id: ID!): Event
-  askHill(message: String!, userId: ID): HillAnswer!
+  listEvents(category: String, limit: Int, nextToken: String): EventConnection! @aws_api_key @aws_cognito_user_pools
+  getEvent(id: ID!): Event @aws_api_key @aws_cognito_user_pools
+  askHill(message: String!): HillAnswer!
 }
 
 type Mutation {
@@ -68,5 +74,7 @@ type Mutation {
 }
 
 type Subscription {
-  onEventCreated: Event @aws_subscribe(mutations: ["createHangout"])
+  onEventCreated: Event
+    @aws_subscribe(mutations: ["createHangout"])
+    @aws_api_key @aws_cognito_user_pools
 }

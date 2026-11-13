@@ -19,13 +19,32 @@ const s3 = new S3Client({ region, maxAttempts: 5 });
 const sns = new SNSClient({ region, maxAttempts: 5 });
 const bedrock = new BedrockRuntimeClient({ region, maxAttempts: 5 });
 
+const allowedDomains = (process.env.ALLOWED_EMAIL_DOMAINS || "ucla.edu,g.ucla.edu")
+  .split(",")
+  .map((domain) => domain.trim().toLowerCase())
+  .filter(Boolean);
+
+// AppSync already rejected bad tokens for student-only fields. This is a second
+// check so an account can't keep access after switching to a non-UCLA email.
+export function requireStudent(identity) {
+  const claims = identity?.claims;
+  if (!identity?.sub || !claims) throw new Error("Sign in with your UCLA email to do that.");
+  const email = String(claims.email ?? "").trim().toLowerCase();
+  const [local, domain, extra] = email.split("@");
+  const verified = claims.email_verified === true || claims.email_verified === "true";
+  if (!local || extra !== undefined || !allowedDomains.includes(domain) || !verified) {
+    throw new Error("Only verified UCLA emails can use this feature.");
+  }
+  return { userId: identity.sub, email };
+}
+
 const isoNow = () => new Date().toISOString();
 const encodeToken = (value) => value ? Buffer.from(JSON.stringify(value)).toString("base64url") : null;
 const decodeToken = (value) => value ? JSON.parse(Buffer.from(value, "base64url").toString("utf8")) : undefined;
 
 function publicEvent(item) {
   if (!item) return null;
-  const { PK, SK, GSI1PK, GSI1SK, entityType, ...event } = item;
+  const { PK, SK, GSI1PK, GSI1SK, entityType, createdBy, ...event } = item;
   return event;
 }
 
@@ -48,7 +67,7 @@ async function getEvent({ id }) {
   return publicEvent(output.Item);
 }
 
-async function createHangout({ input }) {
+async function createHangout({ input }, user) {
   const id = randomUUID();
   const createdAt = isoNow();
   const item = {
@@ -69,6 +88,7 @@ async function createHangout({ input }) {
     people: 1,
     source: "hangout",
     createdAt,
+    createdBy: user.userId,
   };
   await dynamo.send(new PutCommand({ TableName: tableName, Item: item, ConditionExpression: "attribute_not_exists(PK)" }));
   await sns.send(new PublishCommand({ TopicArn: alertsTopicArn, Subject: "New Hill hangout", Message: JSON.stringify(publicEvent(item)) }));
@@ -84,9 +104,18 @@ async function createFlyerUpload({ fileName, contentType }) {
   return { uploadUrl, objectKey, expiresIn: 300 };
 }
 
-async function updatePreferences({ input }) {
+async function updatePreferences({ input }, user) {
   const updatedAt = isoNow();
-  const item = { PK: `USER#${input.userId}`, SK: "PREFERENCES", entityType: "PREFERENCES", ...input, updatedAt };
+  const item = {
+    PK: `USER#${user.userId}`,
+    SK: "PREFERENCES",
+    entityType: "PREFERENCES",
+    userId: user.userId,
+    email: user.email,
+    interests: input.interests,
+    alertsEnabled: input.alertsEnabled,
+    updatedAt,
+  };
   await dynamo.send(new PutCommand({ TableName: tableName, Item: item }));
   return { userId: item.userId, interests: item.interests, alertsEnabled: item.alertsEnabled, updatedAt };
 }
@@ -106,13 +135,16 @@ async function askHill({ message }) {
 }
 
 const handlers = { listEvents, getEvent, askHill, createHangout, createFlyerUpload, updatePreferences };
+// Fields guests may call with the API key. Everything else needs a verified UCLA student.
+const publicFields = new Set(["listEvents", "getEvent"]);
 
 export async function handler(event) {
   const fieldName = event.info?.fieldName;
   const operation = handlers[fieldName];
   if (!operation) throw new Error(`Unsupported GraphQL field: ${fieldName}`);
   try {
-    return await operation(event.arguments ?? {});
+    const user = publicFields.has(fieldName) ? null : requireStudent(event.identity);
+    return await operation(event.arguments ?? {}, user);
   } catch (error) {
     console.error(JSON.stringify({ fieldName, errorName: error?.name, message: error?.message }));
     throw error;
